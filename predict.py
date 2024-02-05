@@ -1,9 +1,8 @@
 import os
 import shutil
-import tarfile
-import zipfile
 import json
 import random
+import subprocess
 from typing import List
 from cog import BasePredictor, Input, Path
 from helpers.comfyui import ComfyUI
@@ -20,6 +19,7 @@ class Predictor(BasePredictor):
     def setup(self):
         self.comfyUI = ComfyUI("127.0.0.1:8188")
         self.comfyUI.start_server(OUTPUT_DIR, INPUT_DIR)
+        self.comfyUI.load_workflow(workflow_json, handle_inputs=False)
 
     def cleanup(self):
         for directory in [OUTPUT_DIR, INPUT_DIR, COMFYUI_TEMP_OUTPUT_DIR]:
@@ -49,11 +49,13 @@ class Predictor(BasePredictor):
         image_2_weight,
         width,
         height,
+        steps,
         control_image,
         prompt,
         negative_prompt,
         seed,
         is_upscale,
+        upscale_steps,
         merge_mode,
     ):
         efficient_loader = workflow["4"]["inputs"]
@@ -70,6 +72,9 @@ class Predictor(BasePredictor):
         efficient_loader["empty_latent_width"] = width
         efficient_loader["empty_latent_height"] = height
 
+        sampler["seed"] = seed
+        sampler["steps"] = steps
+
         if merge_mode == "full":
             del ip_adapter_1["attn_mask"]
             del ip_adapter_2["attn_mask"]
@@ -81,12 +86,12 @@ class Predictor(BasePredictor):
 
             if merge_mode == "top_bottom":
                 workflow["57"]["inputs"]["top"] = height // 2
-                workflow["59"]["inputs"]["y"] = height // 4
-            elif merge_mode == "image_1_right":
-                workflow["57"]["inputs"]["left"] = height // 2
-                workflow["59"]["inputs"]["x"] = height // 4
+                offset = height // 4
+            elif merge_mode == "left_right":
+                workflow["57"]["inputs"]["left"] = width // 2
+                offset = width // 4
 
-        sampler["seed"] = seed
+            self.set_mask_offset(workflow, merge_mode, offset)
 
         if not control_image:
             del efficient_loader["cnet_stack"]
@@ -101,6 +106,7 @@ class Predictor(BasePredictor):
 
         if is_upscale:
             upscaler["seed"] = seed
+            upscaler["steps"] = upscale_steps
             workflow["9"]["class_type"] = "PreviewImage"
         else:
             del workflow["72"]
@@ -109,6 +115,12 @@ class Predictor(BasePredictor):
             del upscaler["positive"]
             del upscaler["negative"]
             del upscaler["vae"]
+
+    def set_mask_offset(self, workflow, merge_mode, offset):
+        if merge_mode == "left_right":
+            workflow["59"]["inputs"]["x"] = offset
+        elif merge_mode == "top_bottom":
+            workflow["59"]["inputs"]["y"] = offset
 
     def log_and_collect_files(self, directory, prefix=""):
         files = []
@@ -148,6 +160,7 @@ class Predictor(BasePredictor):
         ),
         width: int = Input(default=768),
         height: int = Input(default=768),
+        steps: int = Input(default=20),
         control_image: Path = Input(
             default=None,
             description="An optional image to use with control net to influence the merging",
@@ -156,6 +169,16 @@ class Predictor(BasePredictor):
             default=None, description="Fix the random seed for reproducibility"
         ),
         upscale_2x: bool = Input(default=False),
+        upscale_steps: int = Input(
+            default=20, description="The number of steps per controlnet tile"
+        ),
+        animate: bool = Input(
+            default=False,
+            description="Animate merging from one image to the other. Only the video is returned.",
+        ),
+        animate_frames: int = Input(
+            default=24, description="The number of frames to generate for the animation"
+        ),
         return_temp_files: bool = Input(
             description="Return any temporary files, such as preprocessed controlnet images. Useful for debugging.",
             default=False,
@@ -167,9 +190,16 @@ class Predictor(BasePredictor):
         if not image_1 or not image_2:
             raise ValueError("Please provide two input images")
 
-        image_1_filename, image_2_filename, controlnet_filename = self.handle_input_files(
-            image_1, image_2, control_image
-        )
+        if animate and (merge_mode == "full" or not control_image):
+            raise ValueError(
+                "Animation is only supported for left_right and top_bottom merge modes with a control image"
+            )
+
+        (
+            image_1_filename,
+            image_2_filename,
+            controlnet_filename,
+        ) = self.handle_input_files(image_1, image_2, control_image)
 
         if seed is None:
             seed = random.randint(0, 2**32 - 1)
@@ -185,26 +215,71 @@ class Predictor(BasePredictor):
             image_2_strength,
             width,
             height,
+            steps,
             controlnet_filename,
             prompt,
             negative_prompt,
             seed,
             upscale_2x,
+            upscale_steps,
             merge_mode,
         )
 
         wf = self.comfyUI.load_workflow(workflow)
-
         self.comfyUI.connect()
-        self.comfyUI.run_workflow(wf)
+
+        if animate:
+            dimension = width if merge_mode == "left_right" else height
+            step_size = max(
+                1,
+                dimension // animate_frames,
+            )
+            print(f"Dimension: {dimension}")
+            print(f"Step size: {step_size}")
+            for frame_number in range(animate_frames):
+                offset = max(1, step_size * frame_number)
+                print(f"Running frame {frame_number + 1} of {animate_frames}")
+                print(f"Offset: {offset}")
+                self.set_mask_offset(wf, merge_mode, offset)
+                self.comfyUI.run_workflow(wf)
+        else:
+            self.comfyUI.run_workflow(wf)
 
         files = []
         output_directories = [OUTPUT_DIR]
+
         if return_temp_files:
             output_directories.append(COMFYUI_TEMP_OUTPUT_DIR)
 
         for directory in output_directories:
             print(f"Contents of {directory}:")
             files.extend(self.log_and_collect_files(directory))
+
+        if animate:
+            video_output_filename = os.path.join(OUTPUT_DIR, "output_video.mp4")
+            ffmpeg_command = [
+                "ffmpeg",
+                "-r",
+                "12",
+                "-pattern_type",
+                "glob",
+                "-i",
+                f"{OUTPUT_DIR}/*.png",  # Use file order and only PNG images
+                "-c:v",
+                "libx264",  # Video codec to be used
+                "-pix_fmt",
+                "yuv420p",  # Pixel format for compatibility
+                "-vf",
+                "format=yuv420p",  # Set the video format to yuv420p
+                "-y",  # Overwrite output file if it exists
+                video_output_filename,  # Output filename
+            ]
+            try:
+                subprocess.run(ffmpeg_command, check=True)
+                print(f"Video successfully created at {video_output_filename}")
+            except subprocess.CalledProcessError as e:
+                print(f"An error occurred while creating the video: {e}")
+
+            return [Path(video_output_filename)]
 
         return files

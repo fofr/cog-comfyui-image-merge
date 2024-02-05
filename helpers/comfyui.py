@@ -163,7 +163,7 @@ class ComfyUI:
             else:
                 continue
 
-    def load_workflow(self, workflow):
+    def load_workflow(self, workflow, handle_inputs=True):
         if not isinstance(workflow, dict):
             wf = json.loads(workflow)
         else:
@@ -177,7 +177,9 @@ class ComfyUI:
             )
 
         self.handle_weights(wf)
-        self.handle_inputs(wf)
+
+        if handle_inputs:
+            self.handle_inputs(wf)
         return wf
 
     # TODO: Find a better way of doing this
