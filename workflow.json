@@ -204,7 +204,7 @@
   "57": {
     "inputs": {
       "left": 0,
-      "top": 350,
+      "top": 0,
       "right": 0,
       "bottom": 0,
       "mask": [
@@ -231,7 +231,7 @@
   "59": {
     "inputs": {
       "x": 0,
-      "y": 230,
+      "y": 0,
       "operation": "add",
       "destination": [
         "58",
@@ -296,7 +296,7 @@
   "62": {
     "inputs": {
       "weight": 0.9,
-      "noise": 0,
+      "noise": 0.2,
       "weight_type": "original",
       "start_at": 0,
       "end_at": 1,

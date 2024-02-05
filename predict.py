@@ -44,7 +44,9 @@ class Predictor(BasePredictor):
         self,
         workflow,
         left_image,
+        left_weight,
         right_image,
+        right_weight,
         width,
         height,
         control_image,
@@ -52,6 +54,7 @@ class Predictor(BasePredictor):
         negative_prompt,
         seed,
         is_upscale,
+        merge_mode,
     ):
         efficient_loader = workflow["4"]["inputs"]
         upscaler = workflow["71"]["inputs"]
@@ -59,14 +62,29 @@ class Predictor(BasePredictor):
         ip_adapter_1 = workflow["61"]["inputs"]
         ip_adapter_2 = workflow["62"]["inputs"]
 
+        ip_adapter_1["weight"] = left_weight
+        ip_adapter_2["weight"] = right_weight
+
         efficient_loader["positive"] = prompt
         efficient_loader["negative"] = negative_prompt
         efficient_loader["empty_latent_width"] = width
         efficient_loader["empty_latent_height"] = height
 
-        # temporarily ignore masks
-        del ip_adapter_1["attn_mask"]
-        del ip_adapter_2["attn_mask"]
+        if merge_mode == "full":
+            del ip_adapter_1["attn_mask"]
+            del ip_adapter_2["attn_mask"]
+        else:
+            workflow["56"]["inputs"]["width"] = width
+            workflow["56"]["inputs"]["height"] = height
+            workflow["58"]["inputs"]["width"] = width
+            workflow["58"]["inputs"]["height"] = height
+
+            if merge_mode == "top_bottom":
+                workflow["57"]["inputs"]["top"] = height // 2
+                workflow["59"]["inputs"]["y"] = height // 4
+            elif merge_mode == "left_right":
+                workflow["57"]["inputs"]["left"] = height // 2
+                workflow["59"]["inputs"]["x"] = height // 4
 
         sampler["seed"] = seed
 
@@ -109,7 +127,18 @@ class Predictor(BasePredictor):
     def predict(
         self,
         image_1: Path = Input(),
+        image_1_strength: float = Input(
+            ge=0, le=1, default=1, description="The strength of the first image"
+        ),
         image_2: Path = Input(),
+        image_2_strength: float = Input(
+            ge=0, le=1, default=1, description="The strength of the second image"
+        ),
+        merge_mode: str = Input(
+            default="merge",
+            choices=["full", "left_right", "top_bottom"],
+            description="The mode to use for merging the images",
+        ),
         prompt: str = Input(
             default="a photo", description="A prompt to guide the image merging"
         ),
@@ -151,7 +180,9 @@ class Predictor(BasePredictor):
         self.update_workflow(
             workflow,
             left_image,
+            image_1_strength,
             right_image,
+            image_2_strength,
             width,
             height,
             controlnet_image,
@@ -159,6 +190,7 @@ class Predictor(BasePredictor):
             negative_prompt,
             seed,
             upscale_2x,
+            merge_mode,
         )
 
         wf = self.comfyUI.load_workflow(workflow)
