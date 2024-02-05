@@ -135,7 +135,7 @@ class Predictor(BasePredictor):
             ge=0, le=1, default=1, description="The strength of the second image"
         ),
         merge_mode: str = Input(
-            default="merge",
+            default="full",
             choices=["full", "left_right", "top_bottom"],
             description="The mode to use for merging the images",
         ),
