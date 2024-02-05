@@ -10,7 +10,7 @@
   },
   "4": {
     "inputs": {
-      "ckpt_name": "Deliberate_v2.safetensors",
+      "ckpt_name": "Realistic_Vision_V6.0_NV_B1.safetensors",
       "vae_name": "Baked VAE",
       "clip_skip": -1,
       "lora_name": "None",

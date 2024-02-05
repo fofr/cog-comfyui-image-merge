@@ -28,25 +28,25 @@ class Predictor(BasePredictor):
             os.makedirs(directory)
 
     def handle_input_files(self, image_1, image_2, controlnet_image):
-        left_filename = f"left{os.path.splitext(image_1)[1]}"
-        right_filename = f"right{os.path.splitext(image_2)[1]}"
-        shutil.copy(image_1, os.path.join(INPUT_DIR, left_filename))
-        shutil.copy(image_2, os.path.join(INPUT_DIR, right_filename))
+        image_1_filename = f"left{os.path.splitext(image_1)[1]}"
+        image_2_filename = f"right{os.path.splitext(image_2)[1]}"
+        shutil.copy(image_1, os.path.join(INPUT_DIR, image_1_filename))
+        shutil.copy(image_2, os.path.join(INPUT_DIR, image_2_filename))
 
         if controlnet_image:
             controlnet_filename = f"controlnet{os.path.splitext(controlnet_image)[1]}"
             shutil.copy(controlnet_image, os.path.join(INPUT_DIR, controlnet_filename))
-            return left_filename, right_filename, controlnet_filename
+            return image_1_filename, image_2_filename, controlnet_filename
 
-        return left_filename, right_filename, None
+        return image_1_filename, image_2_filename, None
 
     def update_workflow(
         self,
         workflow,
-        left_image,
-        left_weight,
-        right_image,
-        right_weight,
+        image_1_filename,
+        image_1_weight,
+        image_2_filename,
+        image_2_weight,
         width,
         height,
         control_image,
@@ -59,11 +59,11 @@ class Predictor(BasePredictor):
         efficient_loader = workflow["4"]["inputs"]
         upscaler = workflow["71"]["inputs"]
         sampler = workflow["8"]["inputs"]
-        ip_adapter_1 = workflow["61"]["inputs"]
-        ip_adapter_2 = workflow["62"]["inputs"]
+        ip_adapter_1 = workflow["62"]["inputs"]
+        ip_adapter_2 = workflow["61"]["inputs"]
 
-        ip_adapter_1["weight"] = left_weight
-        ip_adapter_2["weight"] = right_weight
+        ip_adapter_1["weight"] = image_1_weight
+        ip_adapter_2["weight"] = image_2_weight
 
         efficient_loader["positive"] = prompt
         efficient_loader["negative"] = negative_prompt
@@ -82,7 +82,7 @@ class Predictor(BasePredictor):
             if merge_mode == "top_bottom":
                 workflow["57"]["inputs"]["top"] = height // 2
                 workflow["59"]["inputs"]["y"] = height // 4
-            elif merge_mode == "left_right":
+            elif merge_mode == "image_1_right":
                 workflow["57"]["inputs"]["left"] = height // 2
                 workflow["59"]["inputs"]["x"] = height // 4
 
@@ -92,12 +92,12 @@ class Predictor(BasePredictor):
             del efficient_loader["cnet_stack"]
 
             # Hack to stop erroring on missing file
-            workflow["20"]["inputs"]["image"] = left_image
+            workflow["20"]["inputs"]["image"] = image_1_filename
         else:
             workflow["20"]["inputs"]["image"] = control_image
 
-        workflow["10"]["inputs"]["image"] = left_image
-        workflow["25"]["inputs"]["image"] = right_image
+        workflow["10"]["inputs"]["image"] = image_1_filename
+        workflow["25"]["inputs"]["image"] = image_2_filename
 
         if is_upscale:
             upscaler["seed"] = seed
@@ -167,7 +167,7 @@ class Predictor(BasePredictor):
         if not image_1 or not image_2:
             raise ValueError("Please provide two input images")
 
-        left_image, right_image, controlnet_image = self.handle_input_files(
+        image_1_filename, image_2_filename, controlnet_filename = self.handle_input_files(
             image_1, image_2, control_image
         )
 
@@ -179,13 +179,13 @@ class Predictor(BasePredictor):
 
         self.update_workflow(
             workflow,
-            left_image,
+            image_1_filename,
             image_1_strength,
-            right_image,
+            image_2_filename,
             image_2_strength,
             width,
             height,
-            controlnet_image,
+            controlnet_filename,
             prompt,
             negative_prompt,
             seed,
