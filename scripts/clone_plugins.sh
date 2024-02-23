@@ -8,6 +8,7 @@
 # Each entry in the array is a string containing the repository URL and the commit hash separated by a space.
 repos=(
   "https://github.com/cubiq/ComfyUI_IPAdapter_plus 4e898fe"
+  "https://github.com/jags111/efficiency-nodes-comfyui 1ac5f18"
 )
 
 # Destination directory
@@ -37,6 +38,12 @@ for repo in "${repos[@]}"; do
 
       # Recursively remove .git directories from submodules
       find . -type d -name ".git" -exec rm -rf {} +
+
+      # If the repository is efficiency-nodes-comfyui, also remove the images directory
+      if [ "$repo_name" = "efficiency-nodes-comfyui" ]; then
+        echo "Removing images and workflows directories from $repo_name"
+        rm -rf images workflows
+      fi
     )
   else
     echo "Skipping clone for $repo_name, directory already exists"
